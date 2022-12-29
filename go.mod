@@ -1,4 +1,4 @@
-module gitee.com/misakacoder/logger
+module github.com/misakacoder/logger
 
 go 1.18
 
