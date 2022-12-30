@@ -11,7 +11,6 @@ type Logger interface {
 	Warn(message string, args ...any)
 	Error(message string, args ...any)
 	Panic(message string, args ...any)
-	isEnable(level Level) bool
 }
 
 type Level uint8
@@ -42,7 +41,7 @@ const (
 
 var (
 	once                  = sync.Once{}
-	currentLogger  Logger = NewSimpleLogger("Unnamed.log")
+	currentLogger  Logger = NewSimpleLogger("")
 	logLevelString        = map[Level]string{
 		DEBUG: "DEBUG",
 		INFO:  "INFO",
@@ -51,6 +50,10 @@ var (
 		PANIC: "PANIC",
 	}
 )
+
+func GetLogger() Logger {
+	return currentLogger
+}
 
 func SetLogger(logger Logger) {
 	once.Do(func() {

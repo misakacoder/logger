@@ -42,11 +42,7 @@ type SimpleLogger struct {
 
 func NewSimpleLogger(logFilename string) *SimpleLogger {
 	logger := &SimpleLogger{
-		logLevel:      INFO,
-		logFilename:   logFilename,
-		messageBuffer: make([]string, 0, maxMessageBufferLength),
-		messageChan:   make(chan string, messageChanLength),
-		signChan:      make(chan os.Signal),
+		logLevel: INFO,
 	}
 	if logFilename != "" {
 		ext := path.Ext(logFilename)
@@ -59,9 +55,13 @@ func NewSimpleLogger(logFilename string) *SimpleLogger {
 		if err != nil {
 			panic(err)
 		}
+		logger.logFilename = logFilename
 		logger.logFile = rotateLogs
+		logger.messageBuffer = make([]string, 0, maxMessageBufferLength)
+		logger.messageChan = make(chan string, messageChanLength)
+		logger.signChan = make(chan os.Signal)
+		go logger.listenFlush()
 	}
-	go logger.listenFlush()
 	return logger
 }
 
@@ -70,23 +70,23 @@ func (logger *SimpleLogger) SetLevel(level Level) {
 }
 
 func (logger *SimpleLogger) Debug(message string, args ...any) {
-	logger.push(DEBUG, message, args...)
+	logger.Push(DEBUG, "", message, args...)
 }
 
 func (logger *SimpleLogger) Info(message string, args ...any) {
-	logger.push(INFO, message, args...)
+	logger.Push(INFO, "", message, args...)
 }
 
 func (logger *SimpleLogger) Warn(message string, args ...any) {
-	logger.push(WARN, message, args...)
+	logger.Push(WARN, "", message, args...)
 }
 
 func (logger *SimpleLogger) Error(message string, args ...any) {
-	logger.push(ERROR, message, args...)
+	logger.Push(ERROR, "", message, args...)
 }
 
 func (logger *SimpleLogger) Panic(message string, args ...any) {
-	logger.push(PANIC, message, args...)
+	logger.Push(PANIC, "", message, args...)
 	time.Sleep(5 * time.Second)
 	logger.signChan <- syscall.SIGQUIT
 }
@@ -95,15 +95,17 @@ func (logger *SimpleLogger) isEnable(level Level) bool {
 	return logger.logLevel <= level
 }
 
-func (logger *SimpleLogger) push(level Level, message string, args ...any) {
+func (logger *SimpleLogger) Push(level Level, caller string, message string, args ...any) {
 	if logger.isEnable(level) {
 		if len(args) > 0 {
 			message = fmt.Sprintf(message, args...)
 		}
 		now := time.Now().Format("2006-01-02 15:04:05.000")
 		pid := strconv.Itoa(os.Getpid())
-		_, file, line, _ := runtime.Caller(3)
-		caller := fmt.Sprintf("%s:%d", file, line)
+		if caller == "" {
+			_, file, line, _ := runtime.Caller(3)
+			caller = fmt.Sprintf("%s:%d", file, line)
+		}
 		colorfulLevelString := level.ToString()
 		switch level {
 		case DEBUG, INFO:
@@ -117,8 +119,10 @@ func (logger *SimpleLogger) push(level Level, message string, args ...any) {
 			break
 		}
 		fmt.Printf(consoleLogFormat+"\n", now, colorfulLevelString, purple+pid+reset, green+caller+reset, message)
-		message = fmt.Sprintf(logFormat, now, level.ToString(), pid, colorRegex.ReplaceAllString(caller, ""), colorRegex.ReplaceAllString(message, ""))
-		logger.messageChan <- message
+		if logger.logFilename != "" {
+			message = fmt.Sprintf(logFormat, now, level.ToString(), pid, colorRegex.ReplaceAllString(caller, ""), colorRegex.ReplaceAllString(message, ""))
+			logger.messageChan <- message
+		}
 	}
 }
 
