@@ -42,9 +42,10 @@ type SimpleLogger struct {
 
 func NewSimpleLogger(logFilename string) *SimpleLogger {
 	logger := &SimpleLogger{
-		logLevel: INFO,
+		logLevel:    INFO,
+		logFilename: logFilename,
 	}
-	if logFilename != "" {
+	if logger.isFileLogger() {
 		ext := path.Ext(logFilename)
 		filename := strings.TrimSuffix(logFilename, ext)
 		rotateLogs, err := rotatelogs.New(
@@ -55,7 +56,6 @@ func NewSimpleLogger(logFilename string) *SimpleLogger {
 		if err != nil {
 			panic(err)
 		}
-		logger.logFilename = logFilename
 		logger.logFile = rotateLogs
 		logger.messageBuffer = make([]string, 0, maxMessageBufferLength)
 		logger.messageChan = make(chan string, messageChanLength)
@@ -87,16 +87,16 @@ func (logger *SimpleLogger) Error(message string, args ...any) {
 
 func (logger *SimpleLogger) Panic(message string, args ...any) {
 	logger.Push(PANIC, "", message, args...)
-	time.Sleep(5 * time.Second)
-	logger.signChan <- syscall.SIGQUIT
-}
-
-func (logger *SimpleLogger) isEnable(level Level) bool {
-	return logger.logLevel <= level
+	if logger.isFileLogger() {
+		time.Sleep(5 * time.Second)
+		logger.signChan <- syscall.SIGQUIT
+	} else {
+		os.Exit(1)
+	}
 }
 
 func (logger *SimpleLogger) Push(level Level, caller string, message string, args ...any) {
-	if logger.isEnable(level) {
+	if logger.isEnabled(level) {
 		if len(args) > 0 {
 			message = fmt.Sprintf(message, args...)
 		}
@@ -119,11 +119,19 @@ func (logger *SimpleLogger) Push(level Level, caller string, message string, arg
 			break
 		}
 		fmt.Printf(consoleLogFormat+"\n", now, colorfulLevelString, purple+pid+reset, green+caller+reset, message)
-		if logger.logFilename != "" {
+		if logger.isFileLogger() {
 			message = fmt.Sprintf(logFormat, now, level.ToString(), pid, colorRegex.ReplaceAllString(caller, ""), colorRegex.ReplaceAllString(message, ""))
 			logger.messageChan <- message
 		}
 	}
+}
+
+func (logger *SimpleLogger) isEnabled(level Level) bool {
+	return logger.logLevel <= level
+}
+
+func (logger *SimpleLogger) isFileLogger() bool {
+	return logger.logFilename != ""
 }
 
 func (logger *SimpleLogger) flush() {
