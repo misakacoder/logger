@@ -20,8 +20,8 @@ const (
 	green                  = "\033[32m"
 	yellow                 = "\033[33m"
 	purple                 = "\033[35m"
-	consoleLogFormat       = "%s %14s %5s %-30s : %s"
-	logFormat              = "%s %5s %5s %-30s : %s"
+	consoleLogFormat       = "%s %s%5s" + reset + " " + purple + "%4s" + reset + " " + green + "%-30s" + reset + " : %s"
+	logFormat              = "%s %5s %4s %-30s : %s"
 	logMaxAge              = 30 * 24 * time.Hour
 	logRotationTime        = 24 * time.Hour
 	maxMessageBufferLength = 100
@@ -106,21 +106,19 @@ func (logger *SimpleLogger) Push(level Level, caller string, message string, arg
 			_, file, line, _ := runtime.Caller(3)
 			caller = fmt.Sprintf("%s:%d", file, line)
 		}
-		colorfulLevelString := level.ToString()
+		levelColor := green
+		levelString := level.ToString()
 		switch level {
 		case DEBUG, INFO:
-			colorfulLevelString = green + colorfulLevelString + reset
-			break
+			levelColor = green
 		case WARN:
-			colorfulLevelString = yellow + colorfulLevelString + reset
-			break
+			levelColor = yellow
 		case ERROR, PANIC:
-			colorfulLevelString = red + colorfulLevelString + reset
-			break
+			levelColor = red
 		}
-		fmt.Printf(consoleLogFormat+"\n", now, colorfulLevelString, purple+pid+reset, green+caller+reset, message)
+		fmt.Printf(consoleLogFormat+"\n", now, levelColor, levelString, pid, caller, message)
 		if logger.isFileLogger() {
-			message = fmt.Sprintf(logFormat, now, level.ToString(), pid, colorRegex.ReplaceAllString(caller, ""), colorRegex.ReplaceAllString(message, ""))
+			message = fmt.Sprintf(logFormat, now, levelString, pid, colorRegex.ReplaceAllString(caller, ""), colorRegex.ReplaceAllString(message, ""))
 			logger.messageChan <- message
 		}
 	}
