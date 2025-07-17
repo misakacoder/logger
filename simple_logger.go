@@ -4,13 +4,11 @@ import (
 	"fmt"
 	"github.com/lestrrat-go/file-rotatelogs"
 	"os"
-	"os/signal"
 	"path"
 	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 )
 
@@ -32,12 +30,12 @@ const (
 var colorRegex, _ = regexp.Compile("\u001B\\[.*?m")
 
 type SimpleLogger struct {
-	logLevel      Level
-	logFilename   string
-	logFile       *rotatelogs.RotateLogs
-	messageBuffer []string
-	messageChan   chan string
-	signChan      chan os.Signal
+	logLevel       Level
+	logFilename    string
+	logFile        *rotatelogs.RotateLogs
+	messageBuffer  []string
+	messageChannel chan string
+	panicSignal    chan struct{}
 }
 
 func NewSimpleLogger(logFilename string) *SimpleLogger {
@@ -58,8 +56,8 @@ func NewSimpleLogger(logFilename string) *SimpleLogger {
 		}
 		logger.logFile = rotateLogs
 		logger.messageBuffer = make([]string, 0, maxMessageBufferLength)
-		logger.messageChan = make(chan string, messageChanLength)
-		logger.signChan = make(chan os.Signal)
+		logger.messageChannel = make(chan string, messageChanLength)
+		logger.panicSignal = make(chan struct{})
 		go logger.listenFlush()
 	}
 	return logger
@@ -88,8 +86,7 @@ func (logger *SimpleLogger) Error(message string, args ...any) {
 func (logger *SimpleLogger) Panic(message string, args ...any) {
 	logger.Push(PANIC, "", message, args...)
 	if logger.isFileLogger() {
-		time.Sleep(5 * time.Second)
-		logger.signChan <- syscall.SIGQUIT
+		logger.panicSignal <- struct{}{}
 	} else {
 		os.Exit(1)
 	}
@@ -119,7 +116,7 @@ func (logger *SimpleLogger) Push(level Level, caller string, message string, arg
 		fmt.Printf(consoleLogFormat+"\n", now, levelColor, levelString, pid, caller, message)
 		if logger.isFileLogger() {
 			message = fmt.Sprintf(logFormat, now, levelString, pid, colorRegex.ReplaceAllString(caller, ""), colorRegex.ReplaceAllString(message, ""))
-			logger.messageChan <- message
+			logger.messageChannel <- message
 		}
 	}
 }
@@ -148,20 +145,31 @@ func (logger *SimpleLogger) flush() {
 }
 
 func (logger *SimpleLogger) listenFlush() {
-	signal.Notify(logger.signChan, syscall.SIGINT, syscall.SIGQUIT, syscall.SIGTERM)
 	ticker := time.NewTicker(flushTimeInterval)
+	defer ticker.Stop()
 	for {
 		select {
-		case message := <-logger.messageChan:
+		case message := <-logger.messageChannel:
 			logger.messageBuffer = append(logger.messageBuffer, message)
-			if len(logger.messageBuffer) == maxMessageBufferLength {
+			if len(logger.messageBuffer) >= maxMessageBufferLength {
 				logger.flush()
 			}
 		case <-ticker.C:
 			logger.flush()
-		case <-logger.signChan:
+		case <-logger.panicSignal:
 			logger.flush()
-			os.Exit(1)
+			for {
+				select {
+				case message := <-logger.messageChannel:
+					logger.messageBuffer = append(logger.messageBuffer, message)
+					if len(logger.messageBuffer) >= maxMessageBufferLength {
+						logger.flush()
+					}
+				default:
+					logger.flush()
+					os.Exit(1)
+				}
+			}
 		}
 	}
 }
